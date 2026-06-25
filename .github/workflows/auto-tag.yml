@@ -1,0 +1,51 @@
+name: Auto Tag
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'LibOrbitGlow-1.0/**'
+      - '.pkgmeta'
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # PAT (not GITHUB_TOKEN) so the pushed tag triggers release.yml.
+          token: ${{ secrets.ORBIT_PAT }}
+
+      - name: Calculate version and create tag
+        run: |
+          # Package version MAJOR.MINOR -- starts at 1.0, MINOR auto-bumps per commit to main.
+          # This is the CurseForge release number, independent of the LibStub MINOR_VERSION (the API revision, bumped by hand).
+          LATEST_TAG=$(git tag --list '[0-9]*.[0-9]*' --sort=-v:refname | grep -v -- '-' | head -n 1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            MAJOR=1
+            MINOR=0
+            echo "No X.Y tag yet. Bootstrapping at 1.0"
+          else
+            MAJOR=$(echo "$LATEST_TAG" | cut -d. -f1)
+            MINOR=$(echo "$LATEST_TAG" | cut -d. -f2)
+            MINOR=$((MINOR + 1))
+          fi
+
+          VERSION="${MAJOR}.${MINOR}"
+          echo "Calculated version: $VERSION"
+
+          if git rev-parse "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists, skipping"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"

@@ -1,0 +1,13 @@
+package-as: LibOrbitGlow-1.0
+
+move-folders:
+  LibOrbitGlow/LibOrbitGlow-1.0: LibOrbitGlow-1.0
+
+ignore:
+  - .github
+  - .gitignore
+  - .env
+  - .pkgmeta
+  - "**/README.md"
+
+enable-nolib-creation: no
