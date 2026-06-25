@@ -8,4 +8,7 @@
 ## X-Website: https://github.com/MoONSHO7/LibOrbitGlow
 ## X-Curse-Project-ID: 1586462
 
+# LibStub is bundled (packager external) so the standalone install is self-sufficient.
+# Embedders load LibOrbitGlow-1.0.xml directly and provide their own LibStub instead.
+LibStub\LibStub.lua
 LibOrbitGlow-1.0.xml

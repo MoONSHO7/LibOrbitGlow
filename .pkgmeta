@@ -3,6 +3,9 @@ package-as: LibOrbitGlow-1.0
 move-folders:
   LibOrbitGlow-1.0/LibOrbitGlow-1.0: LibOrbitGlow-1.0
 
+externals:
+  LibOrbitGlow-1.0/LibStub: https://repos.curseforge.com/wow/libstub/trunk
+
 ignore:
   - .github
   - .gitignore
