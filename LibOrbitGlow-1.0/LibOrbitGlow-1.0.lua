@@ -70,10 +70,12 @@ local function GetColorRGBA(colorTable)
     return colorTable[1] or 1, colorTable[2] or 1, colorTable[3] or 1, colorTable[4] or 1
 end
 
-local function ApplyPaddedAnchors(f, parent, scale, offsetScale, padding, shiftX, shiftY)
+-- hostW/hostH let a caller supply the host rect: a host inside a secure aura hierarchy reads its dimensions
+-- back secret even after an explicit SetSize, so measuring it here would throw on the padding arithmetic.
+local function ApplyPaddedAnchors(f, parent, scale, offsetScale, padding, shiftX, shiftY, hostW, hostH)
     f:ClearAllPoints()
-    local padX = (padding or 0) + (offsetScale or 0) + (parent:GetWidth() * (scale - 1) / 2)
-    local padY = (padding or 0) + (offsetScale or 0) + (parent:GetHeight() * (scale - 1) / 2)
+    local padX = (padding or 0) + (offsetScale or 0) + ((hostW or parent:GetWidth()) * (scale - 1) / 2)
+    local padY = (padding or 0) + (offsetScale or 0) + ((hostH or parent:GetHeight()) * (scale - 1) / 2)
     shiftX = shiftX or 0
     shiftY = shiftY or 0
     f:SetPoint("TOPLEFT", parent, "TOPLEFT", -padX + shiftX, padY + shiftY)
@@ -160,6 +162,7 @@ local function AcquireFrameAndTex(parent, nameKey, N, texture, texCoord, isDesat
     f:SetPoint("TOPLEFT", parent, "TOPLEFT", SUBPIXEL_INSET, SUBPIXEL_INSET)
     f:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -SUBPIXEL_INSET, -SUBPIXEL_INSET)
     f:Show()
+    f.parked = nil
     f.textures = f.textures or {}
     for i = 1, N do
         if not f.textures[i] then
@@ -183,6 +186,15 @@ local function AcquireFrameAndTex(parent, nameKey, N, texture, texCoord, isDesat
     return f
 end
 
+-- An owned host inherits a secret Shown aspect from the secure aura button it hangs off, so its live state is
+-- tracked in a plain field: boolean-testing IsShown() on one throws.
+local function IsGlowLive(f)
+    if f.owned then
+        return not f.parked
+    end
+    return f:IsShown()
+end
+
 local function UpdateFlipbookTexture(texture, currentFrame, rows, cols)
     local frameW = 1 / cols
     local frameH = 1 / rows
@@ -201,11 +213,11 @@ function lib.Flipbook:Show(frame, options)
     -- Visual signature excluding colour: a match on a live frame means a re-show only re-tints, so a glow can be re-driven every event with no teardown and animation restart.
     local sig = (options.atlas or "") .. "|" .. (options.isTexture and "T" or "A") .. "|" .. (options.rows or "") .. "|" .. (options.cols or "") .. "|" .. (options.frames or "") .. "|" .. (options.speed or "") .. "|" .. (options.blendMode or "") .. "|" .. (options.N or 1) .. "|" .. (options.scale or "") .. "|" .. (options.offsetScale or "") .. "|" .. (options.offsetX or "") .. "|" .. (options.offsetY or "") .. "|" .. (options.padding or "") .. "|" .. (options.desaturated == false and "0" or "1") .. "|" .. (options.frameLevel or "")
     local existing = frame[nameKey]
-    if existing and existing:IsShown() and existing.textures and existing.textures[1] then
+    if existing and IsGlowLive(existing) and existing.textures and existing.textures[1] then
         local tex1 = existing.textures[1]
         local isAnimating = (tex1.animGroup and tex1.animGroup:IsPlaying()) or existing:GetScript("OnUpdate")
         if isAnimating and existing.sig == sig and not options.force then
-            ApplyPaddedAnchors(existing, frame, options.scale or DEFAULT_FLIPBOOK_SCALE, options.offsetScale, options.padding, options.offsetX, options.offsetY)
+            ApplyPaddedAnchors(existing, frame, options.scale or DEFAULT_FLIPBOOK_SCALE, options.offsetScale, options.padding, options.offsetX, options.offsetY, options.hostWidth, options.hostHeight)
             for i = 1, #existing.textures do existing.textures[i]:SetVertexColor(r, g, b, a) end
             return
         end
@@ -232,7 +244,7 @@ function lib.Flipbook:Show(frame, options)
     local f = AcquireFrameAndTex(frame, nameKey, N, nil, nil, true, options.frameLevel, r, g, b, a, blendMode, options.owned)
     f.sig = sig
     local scale = options.scale or DEFAULT_FLIPBOOK_SCALE
-    ApplyPaddedAnchors(f, frame, scale, options.offsetScale, options.padding, options.offsetX, options.offsetY)
+    ApplyPaddedAnchors(f, frame, scale, options.offsetScale, options.padding, options.offsetX, options.offsetY, options.hostWidth, options.hostHeight)
     for i = 1, N do
         local tex = f.textures[i]
         tex:SetTexCoord(0, 1, 0, 1)
@@ -275,6 +287,7 @@ function lib.Flipbook:Hide(frame, key)
             tex:Hide()
         end
         f:Hide()
+        f.parked = true
         return
     end
     GlowFramePool:Release(f)
@@ -371,6 +384,7 @@ local function LayerOptions(def, o, path, keySuffix, isCore, blendMode, color, o
         isTexture = true, desaturated = false, blendMode = blendMode, atlas = path,
         rows = def.rows or PROC_ROWS, cols = def.cols or PROC_COLS, frames = def.frames or PROC_FRAMES,
         speed = duration, once = once, onFinished = onFinished, owned = o.owned,
+        hostWidth = o.hostWidth, hostHeight = o.hostHeight,
     }
 end
 
@@ -382,6 +396,7 @@ local function AtlasOptions(def, o, once, duration, onFinished)
         isTexture = false, atlas = def.atlas, desaturated = def.desaturated ~= false,
         blendMode = def.blendMode or "ADD", rows = def.rows, cols = def.cols, frames = def.frames,
         speed = duration, once = once, onFinished = onFinished, owned = o.owned,
+        hostWidth = o.hostWidth, hostHeight = o.hostHeight,
     }
 end
 
@@ -529,7 +544,7 @@ function lib.Autocast:Show(frame, options)
     local nameKey = "_LibGlowAutocast" .. key
     local sig = (options.particles or "") .. "|" .. (options.frequency or "") .. "|" .. (options.scale or "") .. "|" .. (options.xOffset or "") .. "|" .. (options.yOffset or "") .. "|" .. (options.blendMode or "") .. "|" .. (options.frameLevel or "")
     local existing = frame[nameKey]
-    if existing and existing:IsShown() and existing.textures and existing.sig == sig and not options.force then
+    if existing and IsGlowLive(existing) and existing.textures and existing.sig == sig and not options.force then
         for i = 1, #existing.textures do existing.textures[i]:SetVertexColor(r, g, b, a) end
         return
     end
@@ -886,7 +901,7 @@ function lib.Pixel:Show(frame, options)
     local nameKey = "_PixelGlow" .. key
     local sig = (options.lines or "") .. "|" .. (options.frequency or "") .. "|" .. (options.thickness or "") .. "|" .. (options.length or "") .. "|" .. (options.xOffset or "") .. "|" .. (options.yOffset or "") .. "|" .. tostring(options.border ~= false) .. "|" .. (options.pixelScale or "") .. "|" .. (options.frameLevel or "")
     local existing = frame[nameKey]
-    if existing and existing:IsShown() and existing.textures and existing.sig == sig and not options.force then
+    if existing and IsGlowLive(existing) and existing.textures and existing.sig == sig and not options.force then
         for i = 1, #existing.textures do existing.textures[i]:SetVertexColor(r, g, b, a) end
         return
     end
