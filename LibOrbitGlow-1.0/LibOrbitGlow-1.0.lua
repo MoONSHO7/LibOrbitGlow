@@ -1,5 +1,5 @@
 local MAJOR_VERSION = "LibOrbitGlow-1.0"
-local MINOR_VERSION = 9
+local MINOR_VERSION = 10
 local lib = LibStub:NewLibrary(MAJOR_VERSION, MINOR_VERSION)
 if not lib then return end
 
@@ -140,11 +140,19 @@ end
 local GlowFramePool = CreateFramePool("Frame", GLOW_PARENT, nil, FramePoolResetter)
 
 -- [ CORE INITIALIZER ] --------------------------------------------------------
-local function AcquireFrameAndTex(parent, nameKey, N, texture, texCoord, isDesaturated, frameLevel, r, g, b, a, blendMode)
+-- `owned` builds the glow from objects created directly on the host instead of the shared pools. Required for
+-- hosts inside a forbidden hierarchy (secure aura buttons): a pooled object reparented there becomes forbidden
+-- and poisons every later consumer once released, and pool lineage cannot inherit the host's aspects.
+local function AcquireFrameAndTex(parent, nameKey, N, texture, texCoord, isDesaturated, frameLevel, r, g, b, a, blendMode, owned)
     frameLevel = frameLevel or DEFAULT_FRAME_LEVEL
     if not parent[nameKey] then
-        parent[nameKey] = GlowFramePool:Acquire()
-        parent[nameKey]:SetParent(parent)
+        if owned then
+            parent[nameKey] = CreateFrame("Frame", nil, parent)
+            parent[nameKey].owned = true
+        else
+            parent[nameKey] = GlowFramePool:Acquire()
+            parent[nameKey]:SetParent(parent)
+        end
         parent[nameKey].name = nameKey
     end
     local f = parent[nameKey]
@@ -155,12 +163,12 @@ local function AcquireFrameAndTex(parent, nameKey, N, texture, texCoord, isDesat
     f.textures = f.textures or {}
     for i = 1, N do
         if not f.textures[i] then
-            f.textures[i] = GlowTexPool:Acquire()
+            f.textures[i] = f.owned and f:CreateTexture(nil, "ARTWORK", nil, 7) or GlowTexPool:Acquire()
             if texCoord then
                 f.textures[i]:SetTexture(texture)
                 f.textures[i]:SetTexCoord(texCoord[1], texCoord[2], texCoord[3], texCoord[4])
             end
-            f.textures[i]:SetParent(f)
+            if not f.owned then f.textures[i]:SetParent(f) end
             f.textures[i]:SetDrawLayer("ARTWORK", 7)
         end
         f.textures[i]:SetDesaturated(isDesaturated)
@@ -169,7 +177,7 @@ local function AcquireFrameAndTex(parent, nameKey, N, texture, texCoord, isDesat
         f.textures[i]:Show()
     end
     while #f.textures > N do
-        GlowTexPool:Release(f.textures[#f.textures])
+        if f.owned then f.textures[#f.textures]:Hide() else GlowTexPool:Release(f.textures[#f.textures]) end
         table.remove(f.textures)
     end
     return f
@@ -221,7 +229,7 @@ function lib.Flipbook:Show(frame, options)
     frames = frames or (rows * cols)
     local N = options.N or 1
     local blendMode = options.blendMode or "BLEND"
-    local f = AcquireFrameAndTex(frame, nameKey, N, nil, nil, true, options.frameLevel, r, g, b, a, blendMode)
+    local f = AcquireFrameAndTex(frame, nameKey, N, nil, nil, true, options.frameLevel, r, g, b, a, blendMode, options.owned)
     f.sig = sig
     local scale = options.scale or DEFAULT_FLIPBOOK_SCALE
     ApplyPaddedAnchors(f, frame, scale, options.offsetScale, options.padding, options.offsetX, options.offsetY)
@@ -257,10 +265,20 @@ end
 
 function lib.Flipbook:Hide(frame, key)
     local nameKey = "_LibGlowFlipbook" .. (key or "Default")
-    if frame[nameKey] then
-        GlowFramePool:Release(frame[nameKey])
-        frame[nameKey] = nil
+    local f = frame[nameKey]
+    if not f then return end
+    -- Owned glows are host-lifetime objects: park them instead of releasing, or they would enter the shared pool.
+    if f.owned then
+        for i = 1, #f.textures do
+            local tex = f.textures[i]
+            if tex.animGroup and tex.animGroup:IsPlaying() then tex.animGroup:Stop() end
+            tex:Hide()
+        end
+        f:Hide()
+        return
     end
+    GlowFramePool:Release(f)
+    frame[nameKey] = nil
 end
 
 -- [ GLOW REGISTRY ] -----------------------------------------------------------
@@ -352,7 +370,7 @@ local function LayerOptions(def, o, path, keySuffix, isCore, blendMode, color, o
         offsetX = o.offsetX, offsetY = o.offsetY,
         isTexture = true, desaturated = false, blendMode = blendMode, atlas = path,
         rows = def.rows or PROC_ROWS, cols = def.cols or PROC_COLS, frames = def.frames or PROC_FRAMES,
-        speed = duration, once = once, onFinished = onFinished,
+        speed = duration, once = once, onFinished = onFinished, owned = o.owned,
     }
 end
 
@@ -363,7 +381,7 @@ local function AtlasOptions(def, o, once, duration, onFinished)
         offsetX = o.offsetX, offsetY = o.offsetY,
         isTexture = false, atlas = def.atlas, desaturated = def.desaturated ~= false,
         blendMode = def.blendMode or "ADD", rows = def.rows, cols = def.cols, frames = def.frames,
-        speed = duration, once = once, onFinished = onFinished,
+        speed = duration, once = once, onFinished = onFinished, owned = o.owned,
     }
 end
 
