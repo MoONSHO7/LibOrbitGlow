@@ -2,9 +2,9 @@
 
 A drop-in World of Warcraft library for drawing animated **glows** on any frame — action buttons, aura icons, cooldowns, nameplates, anything you can point it at.
 
-It comes with **six distinct glows** built from Blizzard's own UI art, so they look native and most players already recognise them. It can also render **Glow Packs** like [Orbit Pack: Glows](https://www.curseforge.com/wow/addons/orbit-pack-glows) — addons that register their own animated glow atlases for the library to play. Developers add this library to their addon to display and customise glows with a single call, and to consume glow atlases (their own or a third party's) for distribution to their users.
+It comes with **four icon glows** using Blizzard art and **two status bar glows** with bundled rectangular flipbooks. It can also render **Glow Packs** like [Orbit: Media](https://www.curseforge.com/wow/addons/orbit-pack-glows) — addons that register their own animated glow atlases for the library to play. Developers add this library to their addon to display and customise glows with a single call, and to consume glow atlases (their own or a third party's) for distribution to their users.
 
-> Targets retail **12.0+**. Requires only **LibStub** — no other addon dependencies.
+> Targets retail **12.1.0**. Requires only **LibStub** — no other addon dependencies.
 
 ---
 
@@ -12,7 +12,7 @@ It comes with **six distinct glows** built from Blizzard's own UI art, so they l
 
 LibOrbitGlow is split into an **engine** and a **registry**:
 
-- The **engine** draws the six built-in glows and provides pooling, recolouring, throttling, and secret-value safety.
+- The **engine** draws the four built-in icon glows and provides pooling, recolouring, throttling, and secret-value safety.
 - The **registry** is an open list of glows that **Glow Packs** populate at load. The library owns no pack art itself — a pack calls `RegisterGlow` for each of its glows, and from then on every addon embedding LibOrbitGlow can play them.
 
 The upshot: a host addon writes its glow code **once**, and any Glow Pack the user installs automatically appears in that addon's glow options with **zero extra code** on the host's side.
@@ -21,30 +21,28 @@ The upshot: a host addon writes its glow code **once**, and any Glow Pack the us
 
 ## The built-in glows
 
-Six glows, each rendered from native Blizzard assets so they match the game's look:
+Four icon glows, each rendered from native Blizzard assets so they match the game's look:
 
 | Glow | What it looks like |
 |---|---|
-| `Pixel` | Crisp pixel lines tracing the frame's border |
-| `Autocast` | The pet-bar autocast shimmer — rotating shine squares |
 | `Classic` | The classic spell-activation flash and ant swirl |
 | `Thin` | A thin swirling ring of ants |
 | `Thick` | A thick proc-loop ring |
 | `Medium` | The standard action-bar proc glow |
 
-Every glow recolours to any RGBA you pass, is reused from a shared frame/texture pool, throttles its animation to 60fps, and is safe to drive from WoW 12.0 secret values.
+Icon glows use shared frame/texture pools, or host-owned objects for restricted aura hierarchies. Status bar glows use host-owned textures with native, scriptless flipbook animations. Hosts own visibility and supply accessible configuration; see the restriction contract below.
 
 ## Glow Packs
 
-Richer, hand-animated glows come from **packs** — small addons that register their atlases with this library. The flagship is [**Orbit Pack: Glows**](https://www.curseforge.com/wow/addons/orbit-pack-glows): a library of animated proc / pandemic glows. Install a pack and it shows up automatically anywhere LibOrbitGlow is used. Developers can ship their own packs too — see [Build a glow pack](#build-a-glow-pack).
+Richer, hand-animated glows come from **packs** — small addons that register their atlases with this library. The flagship is [**Orbit: Media**](https://www.curseforge.com/wow/addons/orbit-pack-glows): a library of animated proc / pandemic glows. Install a pack and it shows up automatically anywhere LibOrbitGlow is used. Developers can ship their own packs too — see [Build a glow pack](#build-a-glow-pack).
 
 ---
 
 ## Installation
 
-**Players:** install it from CurseForge. It loads on its own, gives you a `/orbitglow` showcase to preview every glow (including any installed packs), and any addon that embeds it uses it automatically.
+**Players:** install it from CurseForge when an addon requires it. It provides the glow engine and registries to consuming addons through LibStub.
 
-**Developers (embedding):** drop the `LibOrbitGlow-1.0/` folder into your addon and include its manifest from your `.toc` or XML — it loads the engine then the optional showcase:
+**Developers (embedding):** drop the `LibOrbitGlow-1.0/` folder into your addon and include its manifest from your `.toc` or XML — it loads the icon engine and status bar module:
 
 ```xml
 <Include file="Libs\LibOrbitGlow-1.0\LibOrbitGlow-1.0.xml"/>
@@ -56,8 +54,6 @@ Then consume it via LibStub:
 local lib = LibStub("LibOrbitGlow-1.0", true)
 if not lib then return end
 ```
-
-(Delete the `GlowShowcase.lua` line from that XML to embed the engine without the demo panel and slash command.)
 
 ---
 
@@ -71,12 +67,10 @@ The library exposes a simplified facade that abstracts away the underlying anima
 local lib = LibStub("LibOrbitGlow-1.0", true)
 if not lib then return end
 
-lib.Show(frame, "Pixel", {
+lib.Show(frame, "Medium", {
     key = "myComponentGlow",
     color = { 0.2, 0.8, 1, 1 },
-    lines = 8,
-    frequency = 0.5,
-    thickness = 2
+    speed = 1.0
 })
 ```
 
@@ -85,15 +79,15 @@ lib.Show(frame, "Pixel", {
 Hide a glow using the exact same type and key you showed it with, so the library can gracefully stop the animation and recycle the frame back into the pool.
 
 ```lua
-lib.Hide(frame, "Pixel", "myComponentGlow")
+lib.Hide(frame, "Medium", "myComponentGlow")
 ```
 
 ### One call for any glow (recommended)
 
-`lib.Show` / `lib.Hide` reach the built-in **engine** types directly. But if your addon stores a glow choice as a setting, that value might be an engine type (`"Pixel"`) *or* the name of a glow a pack registered (`"pinring"`) — and you shouldn't have to branch on which. `lib.Apply` / `lib.Remove` resolve either:
+`lib.Show` / `lib.Hide` reach the built-in **engine** types directly. But if your addon stores a glow choice as a setting, that value might be an engine type (`"Medium"`) *or* the name of a glow a pack registered (`"pinring"`) — and you shouldn't have to branch on which. `lib.Apply` / `lib.Remove` resolve either:
 
 ```lua
-local id = mySettings.glow   -- "Pixel", "Medium", or any registered pack glow like "pinring"
+local id = mySettings.glow   -- "Thin", "Medium", or any registered pack glow like "pinring"
 lib.Apply(frame, id, { key = "proc", color = { 0.3, 0.8, 1, 1 } })
 -- ... later:
 lib.Remove(frame, id, "proc")
@@ -104,21 +98,105 @@ lib.Apply(frame, id, { key = "buff", color = { 1, 0.8, 0.2, 1 }, loop = true })
 
 A registered name plays its full proc lifecycle (one-shot start, looping body, one-shot end on `Remove`); `loop = true` plays the loop continuously with no intro (call `Proc:Clear` instead of `Remove` for an instant cut). An engine type shows and hides directly. `Remove` accepts either a bare key or the same options table you passed to `Apply`. Use `Apply` / `Remove` everywhere you drive a glow from user choice.
 
-> **Call style:** the top-level verbs are **dot**-called — `lib.Show`, `lib.Hide`, `lib.Apply`, `lib.Remove`, `lib.PreLoad`. The registry and the `Proc` / engine sub-namespaces are **colon** (method) calls — `lib:RegisterGlow(...)`, `lib.Proc:Start(...)`, `lib.Pixel:Show(...)`.
+> **Call style:** the top-level verbs are **dot**-called — `lib.Show`, `lib.Hide`, `lib.Apply`, `lib.Remove`, `lib.PreLoad`. The registry and the `Proc` / engine sub-namespaces are **colon** (method) calls — `lib:RegisterGlow(...)`, `lib.Proc:Start(...)`, `lib.StatusBar:Show(...)`.
 
 ### Combat and secret-value safety
 
-When tracking auras, cooldowns, or power states that return WoW 12.0 *secret values*, you cannot branch Lua logic on those values — so you cannot conditionally call `lib.Hide()` when an aura drops during combat.
+A curve result can itself be secret. Pass it directly to a native alpha or colour sink; do not branch or do arithmetic on it. An accessible colour table may contain secret channels, but a secret ColorMixin cannot be indexed to call `GetRGBA`. Classic performs Lua alpha arithmetic and needs plain colour values.
 
-Instead, drive visibility through the glow's alpha with a plain (non-secret) number, or through a C++ sink on the parent. Note that `x and 1 or 0` on a secret boolean is itself a Lua-side branch and will throw.
+Restricted AuraButtons require creation inside `initializeFrame`, followed by restyling only when aura access is permitted. Being out of combat does **not** prove an AuraButton is accessible. Callers must not invoke any glow method on an access-restricted host. Pass known layout dimensions instead of reading a secret rect. The library does not inspect aura data, infer visibility, or install aura callbacks.
 
 ```lua
--- Safe: alpha is a plain number from a non-secret read (e.g. a numeric curve)
-lib.Show(frame, "Pixel", { color = { 1, 0, 0, alpha } })
-
--- Or derive visibility from a secret boolean via a C++ sink on the parent:
-parent:SetAlphaFromBoolean(secretBool, 1.0, 0.0)
+parent:SetAlphaFromBoolean(secretBool, 1, 0)
 ```
+
+---
+
+## Status bar glows
+
+`StatusBarGlows.lua` owns a separate registry and renderer for rectangular frame outlines. **Tracer** (`tracer`) and **Pin Neon** (`pinneon`) ship as baselines, with 2.5:1 and 4:1 sheets and square/soft/softer/round/chamfer variants. All textures live inside the library; Orbit is not a dependency. Consumers describe their outline with `contour`, or select an explicit pack `shape`. The library never reads, creates, replaces or removes the consumer's masks.
+
+Chamfer sheets follow straight 45-degree cuts. `chamfer-small`, `chamfer`, and `chamfer-large` cut 6.25%, 12.5%, and 25% of the source content's shorter side. Rounded sheets provide `soft-small` (6.25%), `soft` (12.5%), `soft-large` (17.5%), `softer` (25%), `round` (35%), and `round-large` (50%) radii. Their registered geometry lets the library choose a sheet without consumers knowing these names.
+
+```lua
+local surfaces = lib.StatusBar:Show(bar, {
+    glow = "tracer", key = "dispel", color = { 0.2, 0.6, 1, 1 },
+    width = 160, height = 40,
+    contour = { kind = "rounded", radius = 8 },
+})
+-- ... later, while the host is accessible:
+lib.StatusBar:Hide(bar, "dispel")
+```
+
+`Show` creates textures directly on `bar`, returns a handle with `body`, optional `core`, and the resolved `shape`, and reuses them for the lifetime of that host/key. Recolouring and resizing do not restart unchanged animation; changing the sheet or duration does. `Hide` stops both animations and hides their textures without changing the host. Reuse a bounded set of keys.
+
+### Contour selection
+
+This API requires `lib.statusBarMinor >= 12`. Corner dimensions use the same logical units as the host width and height; consumers convert physical-pixel settings through their own scale system.
+
+| `contour` | Requested outer outline |
+|---|---|
+| `{ kind = "square" }` | Square corners |
+| `{ kind = "rounded", radius = 8 }` | Circular 8-unit corners |
+| `{ kind = "chamfer", cut = 5 }` | Straight cuts extending 5 units along each adjoining edge |
+
+Selection precedence is **explicit `shape` → `contour` → square**. An explicit shape overrides the contour entirely; an unavailable shape falls back to square. Omitting both always selects square, including when updating an existing glow. Zero radius/cut also selects square; oversized values clamp to half the host's shorter side.
+
+The library first chooses the closest aspect ratio proportionally, then compares the rendered horizontal and vertical corner sizes against the request. Only registered geometry of the requested kind and the square fallback participate. Equal corner errors prefer the larger fraction, then the alphabetically first shape; equal aspect errors retain definition order. A pack with no contour metadata remains square unless an explicit shape is supplied.
+
+These are baked outlines, so matches are approximate and aspect stretching can make a rounded corner elliptical. Custom silhouettes use an explicit `shape` and matching pack artwork. A mask file alone cannot describe the glow's path. Invalid or secret contour data returns `nil` before changing an existing glow; an explicit valid shape bypasses contour validation.
+
+The glow follows the host's **whole rectangle**, not its filled percentage. For a health bar under other frame layers, mount on a caller-owned overlay at the desired frame level. `width` and `height` are known logical layout dimensions; when omitted the library measures the host. Secret, zero, or invalid dimensions return `nil` without changing an existing glow. `duration` optionally overrides the definition's loop duration. Unknown names fall back to Tracer. Only the StatusBar API resolves these names; icon `Apply`/`Proc` and `GetGlowList()` stay separate.
+
+### Register your own status bar glow
+
+```lua
+lib:RegisterStatusBarGlow("my-pack.ribbon", {
+    label = "Ribbon", source = "My Glow Pack",
+    variants = {
+        { ratio = 4, path = "Interface\\AddOns\\MyPack\\Textures\\ribbon-wide" },
+        { ratio = 2.5, path = "Interface\\AddOns\\MyPack\\Textures\\ribbon-compact" },
+    },
+    shapes = { square = "", soft = "-soft", round = "-round" },
+    contours = {
+        soft = { kind = "rounded", radiusFraction = 0.125 },
+        round = { kind = "rounded", radiusFraction = 0.35 },
+    },
+    rows = 6, cols = 5, frames = 30, duration = 1,
+    overhang = 0.125, core = true, coreAlpha = 0.85,
+    bodyBlend = "BLEND", coreBlend = "ADD",
+})
+```
+
+Each sheet path resolves to `variant.path .. shapes[shape] .. ext`, with `ext = ".tga"` by default. `shapes` defaults to `{ square = "" }`; a square entry is required. A single-variant, single-shape pack works too. Supply `rows`, `cols` and `frames` for a different grid. Use grayscale RGBA sheets: the same art supplies a tinted body plus an additive core; `core = false` makes it one layer. `overhang` extends each edge by that fraction of the host dimension. Values above are the rendering defaults.
+
+`contours` is optional metadata keyed by the pack's own shape names. Use `{ kind = "rounded", radiusFraction = ... }` or `{ kind = "chamfer", cutFraction = ... }`, with a finite fraction from 0 to 0.5 of the **source content's shorter side**, excluding halo overhang. A shape uses the same fraction across its aspect variants. Metadata must reference an existing shape; square geometry is implicit and cannot be redefined as rounded/chamfered. Geometry entries are copied at registration, and malformed entries reject the registration without replacing its previous definition. Unusual shapes can omit metadata and remain explicitly selectable.
+
+Registration validates and copies the definition, returns `false` for malformed data, and replaces an existing name on success. Namespace names by pack to avoid collisions. Register during addon load; hosts can discover new definitions whenever they rebuild their options:
+
+```lua
+for _, name in ipairs(lib:GetStatusBarGlowList()) do
+    local info = lib:GetStatusBarGlowInfo(name) -- label, source, variants, shapes, contours, rendering options
+end
+```
+
+`IsStatusBarGlowRegistered(name)` checks availability; `UnregisterStatusBarGlow(name)` removes a definition (Tracer is retained as the fallback). Treat `GetStatusBarGlowInfo` as read-only; use registration to update it. `lib.statusBarRevision` increments on registry changes. `lib.StatusBar:Resolve(name, width, height, shape, contour)` returns the selected texture path, definition and resolved shape for custom previews/debugging. Pass `nil` as `shape` to select from a contour. Existing calls using the first four arguments retain their behavior.
+
+### Injecting surfaces into a native display
+
+The returned textures are real, host-owned regions. An addon can pass them to Blizzard's display sinks in an AuraButton initializer:
+
+```lua
+initializeFrame = function(button)
+    local surfaces = lib.StatusBar:Show(button, {
+        glow = "pinneon", width = 160, height = 40, key = "refresh",
+    })
+    button:AddPandemicRegion(surfaces.body)
+    if surfaces.core then button:AddPandemicRegion(surfaces.core) end
+end
+```
+
+Once a native sink owns visibility, let it drive those regions. Do not call `Show`/`Hide` to track aura state; any later presentation change must run in an accessible styling window. The native flipbooks use no Lua scripts, pooled objects, reparenting, or per-frame addon work.
 
 ---
 
@@ -156,7 +234,7 @@ A pack is just an addon that calls `lib:RegisterGlow` for each of its glows duri
 | `path` | `string` | — | File-prefix for a flipbook sheet; resolves to `"<path>-<phase>[-<shape>]<layer><ext>"` |
 | `resolve` | `function(phase, shape, layer)` | — | Full override of path resolution — use any naming you like; return `nil` for a phase/layer you don't ship |
 | `atlas` | `string` | — | A Blizzard **atlas name** (single layer, `SetAtlas`) instead of files |
-| `engine` | `string` | — | Delegate to a built-in engine (`"Pixel"`, `"Autocast"`, `"Classic"`, `"Thin"`, `"Thick"`, `"Medium"`) |
+| `engine` | `string` | — | Delegate to a built-in engine (`"Classic"`, `"Thin"`, `"Thick"`, `"Medium"`) |
 | `layered` | `boolean` | `false` | Draw a tinted **BLEND body** + a near-white **ADD core** (depth). `false` = one tinted layer |
 | `core` | `boolean` | `true` | When `layered`, include the `-core` layer (set `false` for a body-only layered glow) |
 | `blendMode` | `string` | `"ADD"` | Blend for a single-layer `path` / `atlas` def |
@@ -169,8 +247,8 @@ A pack is just an addon that calls `lib:RegisterGlow` for each of its glows duri
 | `shapes` | `table` | `{ square = true }` | Corner shapes your art ships, e.g. `{ square = true, round = true }` |
 | `scale` | `number` | engine default | Default size multiplier (path / atlas defs). For an `engine` def, sizing goes through `options` |
 | `desaturated` | `boolean` | `true` | (`atlas` defs) desaturate before tinting |
-| `options` | `table` | — | (`engine` defs) extra engine options (`lines`, `length`, `particles`, …) |
-| `source` | `string` | `"Unknown"` | Group label for the showcase / picker — use your pack name |
+| `options` | `table` | — | (`engine` defs) extra engine options (`scale`, `frequency`, …) |
+| `source` | `string` | `"Unknown"` | Group label for consumer pickers — use your pack name |
 
 ```lua
 local lib = LibStub("LibOrbitGlow-1.0", true)
@@ -199,25 +277,13 @@ lib:RegisterGlow("ribbon", {
 })
 ```
 
-The flipbook grid (`rows` / `cols` / `frames`) describes how the sheet is sliced — one frame per cell over `loopDuration` seconds (`.tga`, any cell size; Orbit Pack: Glows uses 128×128 cells on a 640×768 sheet). **Layered / `path` art must be grayscale** — the layers are *tinted* by your `color` at draw time (not desaturated), so coloured source art multiplies muddily; the body takes your colour and the core is auto-brightened toward white for depth.
+The flipbook grid (`rows` / `cols` / `frames`) describes how the sheet is sliced — one frame per cell over `loopDuration` seconds (`.tga`, any cell size; Orbit: Media uses 128×128 cells on a 640×768 sheet). **Layered / `path` art must be grayscale** — the layers are *tinted* by your `color` at draw time (not desaturated), so coloured source art multiplies muddily; the body takes your colour and the core is auto-brightened toward white for depth.
 
 The host discovers your glows purely through `GetGlowList()` — no host-side code change is needed to surface a new pack. If a glow renders blank, call `lib:GetResolvedPaths(name [, shape])` to get the exact paths the lib is trying (WoW's `SetTexture` fails **silently** on a missing file), or set `lib.DEBUG = true` to print each path as it plays. A loop-only pack must declare `loopOnly = true` (or `phases`), or the lib will try to play `-start` / `-end` art it assumes exists.
 
 ### Lower-level flipbook
 
 `lib.Flipbook:Show(frame, opts)` is the raw sink the registry feeds. It accepts `atlas` (a Blizzard atlas name, or a file path with `isTexture = true`), `rows` / `cols` / `frames`, `speed`, `blendMode`, `color`, `key`, plus `once = true` + `onFinished` for a single one-shot. Use it directly only if the registry / `Proc` model doesn't fit.
-
----
-
-## Showcase
-
-The library bundles a self-contained visual showcase — a movable, scrollable grid of every registered glow, grouped into collapsible sections by source pack. Left-click a glow to apply it to `ActionButton1`, right-click to re-roll colours, collapse a section with its header arrow. It depends only on LibOrbitGlow and the Blizzard UI, so it travels with the library and works in any host.
-
-```lua
-LibStub("LibOrbitGlow-1.0").Showcase:Toggle()   -- also :Show() / :Hide()
-```
-
-A `/orbitglow` slash command toggles it (guarded — if the command is already taken, the library leaves it alone and you drive the showcase via `Showcase:Toggle()`).
 
 ---
 
@@ -230,31 +296,14 @@ Passed as the 3rd argument to `lib.Show(frame, glowType, options)`, honoured acr
 | Field | Type | Description |
 |---|---|---|
 | `key` | `string` | Unique id used for tracking and hiding. Default: `"Default"` |
-| `color` | `table` | `{ r, g, b, a }` array or a 12.0 `Color` object. Default: white |
+| `color` | `table` | `{ r, g, b, a }` array or an accessible `Color` object. Default: white |
 | `frameLevel` | `number` | Relative frame level above the parent. Default: `8` |
-| `desaturated` | `boolean` | Atlas engines (`Thin` / `Thick` / `Medium`) desaturate before tinting; pass `false` to keep native colours. Ignored by `Pixel` / `Autocast`. Default: `true` |
+| `desaturated` | `boolean` | Atlas engines (`Thin` / `Thick` / `Medium`) desaturate before tinting; pass `false` to keep native colours. Default: `true` |
 | `force` | `boolean` | On a re-show of a live glow, rebuild even when options are unchanged (defeats the re-tint fast path). Honoured by all engines. Default: `false` |
 
 ### Flipbook engines (`Thin`, `Thick`, `Medium`)
 
 - `scale` (number): multiplier applied to width and height. Default: `1.4`.
-
-### Pixel engine (`Pixel`)
-
-- `lines` (number): number of tracing particles. Default: `8`
-- `frequency` (number): speed scaler. Positive = faster than baseline (`period = 0.25 / frequency`); `0` or unset = baseline (4s); negative = slower (`period = baseline * (1 + |frequency| * 8)`).
-- `thickness` (number): width of the tracing particles. Default: `2`
-- `length` (number): arc length of each dash. Default: auto-derived from the frame perimeter and `lines`.
-- `border` (boolean): a dark translucent backdrop strictly inside the pixel bounds, for contrast. Default: `true`
-- `xOffset` / `yOffset` (number): margin expanding the tracking box away from the edges.
-- `pixelScale` (number): physical-pixel size used to snap the trace to the device grid (`pixelScale / frame:GetEffectiveScale()`). Default `1`. Pass the host's screen scale for crisp lines at any UI scale.
-
-### Autocast engine (`Autocast`)
-
-- `particles` (number): number of points mapping the border. Default: `4`
-- `frequency` (number): rotation speed scaler. Same sign convention as Pixel — positive = faster (`period = 1 / frequency`); `0` or unset = baseline (8s); negative = slower.
-- `scale` (number): scaling scalar on each particle. Default: `1`
-- `xOffset` / `yOffset` (number): margin expanding the tracking box away from the edges.
 
 ### Best practices
 
@@ -267,10 +316,14 @@ Passed as the 3rd argument to `lib.Show(frame, glowType, options)`, honoured acr
 
 ## Embedding & versioning
 
-Targets **retail 12.0+** (the showcase uses retail-only `ScrollUtil` / `MinimalScrollBar`; the core engine uses `CreateMaskTexture` / `CreateFramePool`). LibStub hands every embedder whichever copy of the library loaded **first** (highest minor wins), so feature-probe rather than assume when you rely on a newer method — a co-installed older copy may not have it:
+Minor 11 removes the Pixel and Autocast engines and their registry entries. Hosts must migrate saved selections to retained styles. Load the XML manifest to include `StatusBarGlows.lua` and retain its adjacent `Textures` folder when embedding.
+
+Minor 12 adds status-bar contour selection and optional pack geometry metadata. Older string-based shape registrations remain valid; unknown metadata-free shapes are never assigned inferred geometry. This does not change the icon `Apply`/`Proc` shape API.
+
+Targets **retail 12.1.0**; the core engine uses `CreateMaskTexture` / `CreateFramePool`. LibStub shares one library table between embedders and upgrades it when a higher minor loads, so feature-probe rather than assume when you rely on a newer method — a co-installed older copy may not have it:
 
 ```lua
-if lib.Apply then lib.Apply(frame, id, opts) else lib.Show(frame, id, opts) end
+if lib.StatusBar then lib.StatusBar:Show(bar, opts) end
 ```
 
 ---
@@ -278,3 +331,7 @@ if lib.Apply then lib.Apply(frame, id, opts) else lib.Show(frame, id, opts) end
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Development checks
+
+Run `python tests/test_glows.py` with `lupa` (Lua 5.1). The tests exercise registration, embedded upgrades, retained icon engines, variant paths, texture ownership/reuse, resizing and cleanup. Verify actual art, layering and aura restrictions in WoW through the consuming addon's displays and previews.
